@@ -1,0 +1,165 @@
+# Application Configuration
+# WHO: DevOps and Development teams
+# WHAT: Centralized configuration for all application components
+# WHY: Externalize configuration for different environments
+# HOW: Uses Spring Boot's hierarchical configuration
+
+spring:
+  application:
+    name: eventhub-outbox-service
+  
+  # Database Configuration (PostgreSQL with CDC support)
+  datasource:
+    url: jdbc:postgresql://localhost:5432/outboxdb
+    username: ${DB_USERNAME:outbox_user}
+    password: ${DB_PASSWORD:outbox_pass}
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      maximum-pool-size: 20
+      minimum-idle: 5
+      connection-timeout: 30000
+      idle-timeout: 600000
+      max-lifetime: 1800000
+      leak-detection-threshold: 60000
+  
+  # JPA Configuration
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+        format_sql: true
+        jdbc:
+          batch_size: 50
+        order_inserts: true
+        order_updates: true
+    show-sql: false
+  
+  # Flyway for Database Migration
+  flyway:
+    enabled: true
+    baseline-on-migrate: true
+    locations: classpath:db/migration
+
+# Azure Event Hub Configuration
+azure:
+  eventhub:
+    namespace: ${EVENTHUB_NAMESPACE:your-eventhub-namespace}
+    connection-string: ${EVENTHUB_CONNECTION_STRING}
+    event-hub-name: ${EVENTHUB_NAME:events}
+    consumer-group: ${EVENTHUB_CONSUMER_GROUP:$Default}
+    checkpoint-store:
+      connection-string: ${CHECKPOINT_STORAGE_CONNECTION_STRING}
+      container-name: ${CHECKPOINT_CONTAINER:checkpoints}
+    # Backpressure Configuration
+    backpressure:
+      max-batch-size: 100
+      max-wait-time-seconds: 10
+      prefetch-count: 300
+    # Retry Configuration
+    retry:
+      max-retries: 3
+      backoff-delay-ms: 1000
+      max-backoff-delay-ms: 30000
+
+# Outbox Pattern Configuration
+outbox:
+  # CDC Polling Configuration
+  cdc:
+    enabled: true
+    polling-interval-ms: 1000
+    batch-size: 100
+    lock-timeout-ms: 5000
+  # Cleanup Configuration
+  cleanup:
+    enabled: true
+    retention-days: 7
+    cron: "0 0 2 * * ?"
+
+# Resilience4j Circuit Breaker Configuration
+resilience4j:
+  circuitbreaker:
+    instances:
+      eventHubPublisher:
+        registerHealthIndicator: true
+        slidingWindowSize: 10
+        minimumNumberOfCalls: 5
+        permittedNumberOfCallsInHalfOpenState: 3
+        automaticTransitionFromOpenToHalfOpenEnabled: true
+        waitDurationInOpenState: 10s
+        failureRateThreshold: 50
+        slowCallRateThreshold: 50
+        slowCallDurationThreshold: 2s
+        recordExceptions:
+          - com.azure.messaging.eventhubs.EventHubException
+          - java.io.IOException
+  
+  # Bulkhead Configuration
+  bulkhead:
+    instances:
+      eventHubPublisher:
+        maxConcurrentCalls: 25
+        maxWaitDuration: 100ms
+  
+  # Rate Limiter Configuration
+  ratelimiter:
+    instances:
+      eventHubPublisher:
+        limitForPeriod: 100
+        limitRefreshPeriod: 1s
+        timeoutDuration: 500ms
+  
+  # Retry Configuration
+  retry:
+    instances:
+      eventHubPublisher:
+        maxAttempts: 3
+        waitDuration: 1s
+        exponentialBackoffMultiplier: 2
+        retryExceptions:
+          - com.azure.messaging.eventhubs.EventHubException
+        ignoreExceptions:
+          - java.lang.IllegalArgumentException
+
+# Actuator Configuration for Monitoring
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,metrics,prometheus,circuitbreakers,ratelimiters
+  endpoint:
+    health:
+      show-details: always
+  metrics:
+    export:
+      prometheus:
+        enabled: true
+    distribution:
+      percentiles-histogram:
+        http.server.requests: true
+
+# Logging Configuration
+logging:
+  level:
+    com.enterprise.eventhub: DEBUG
+    com.azure: INFO
+    org.hibernate.SQL: DEBUG
+    org.hibernate.type.descriptor.sql.BasicBinder: TRACE
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss} - %msg%n"
+    file: "%d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level %logger{36} - %msg%n"
+
+# Custom Application Properties
+app:
+  event:
+    # Event Type Routing
+    routing:
+      order-created: order-events
+      payment-processed: payment-events
+      inventory-updated: inventory-events
+      user-registered: user-events
+    # Dead Letter Queue Configuration
+    dlq:
+      enabled: true
+      max-retry-attempts: 3
