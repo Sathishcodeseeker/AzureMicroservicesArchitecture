@@ -1,0 +1,64 @@
+###############################################################################
+# Local development stack — no Azure required.
+#
+#   docker compose up --build
+#
+# 1. Postgres starts, healthcheck passes.
+# 2. App starts, Flyway runs V1-V3 migrations automatically.
+# 3. API is live at http://localhost:8080
+###############################################################################
+version: "3.9"
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: outbox-postgres
+    environment:
+      POSTGRES_USER:     outbox_user
+      POSTGRES_PASSWORD: outbox_pass
+      POSTGRES_DB:       outboxdb
+    ports:
+      - "5432:5432"          # expose to host for pgAdmin / psql
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test:     ["CMD-SHELL", "pg_isready -U outbox_user -d outboxdb"]
+      interval: 5s
+      timeout:  3s
+      retries:  5
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: outbox-app
+    depends_on:
+      postgres:
+        condition: service_healthy   # waits for pg healthcheck before starting
+
+    ports:
+      - "8080:8080"
+
+    environment:
+      # ── datasource override ──────────────────────────────────────────────
+      # application.yml hardcodes localhost:5432.  This env var overrides it
+      # so the app connects to the "postgres" service by its compose hostname.
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/outboxdb
+      DB_USERNAME:           outbox_user
+      DB_PASSWORD:           outbox_pass
+
+      # ── Event Hub (dummy values) ─────────────────────────────────────────
+      # The publisher/consumer will fail at runtime but the outbox write path
+      # and CDC polling work fine for local smoke testing.
+      EVENTHUB_NAMESPACE:                   local-ns
+      EVENTHUB_CONNECTION_STRING:           "Endpoint=sb://local.servicebus.windows.net/;SharedAccessKeyName=RootManageSharedAccessKey;SharedAccessKey=bG9jYWw="
+      EVENTHUB_NAME:                        events
+      EVENTHUB_CONSUMER_GROUP:              "\$Default"
+      CHECKPOINT_STORAGE_CONNECTION_STRING: "DefaultEndpointsProtocol=https;AccountName=local;AccountKey=bG9jYWw=;EndpointSuffix=core.windows.net"
+      CHECKPOINT_CONTAINER:                 checkpoints
+
+      # ── JVM sizing for a dev laptop ──────────────────────────────────────
+      JAVA_TOOL_OPTIONS: "-Xms256m -Xmx512m"
+
+volumes:
+  pgdata:

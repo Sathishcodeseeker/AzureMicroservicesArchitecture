@@ -1,0 +1,163 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: eventhub-outbox
+  namespace: outbox-svc
+  labels:
+    app: eventhub-outbox
+    version: "1.0.0"
+spec:
+  replicas: 3
+  revisionHistoryLimit: 3
+
+  selector:
+    matchLabels:
+      app: eventhub-outbox
+
+  # ---------------------------------------------------------------------------
+  # Rolling update: at most 1 pod unavailable, at most 1 extra pod created.
+  # Pairs with the PDB (minAvailable: 2) to guarantee 2 healthy pods at all
+  # times during a rollout.
+  # ---------------------------------------------------------------------------
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
+      maxSurge: 1
+
+  template:
+    metadata:
+      labels:
+        app: eventhub-outbox
+        version: "1.0.0"
+      annotations:
+        # Prometheus scraper discovery
+        prometheus.io/scrape: "true"
+        prometheus.io/port:   "8080"
+        prometheus.io/path:   "/actuator/prometheus"
+
+    spec:
+      # Spring Boot needs ~5 s to flush connections on SIGTERM.
+      terminationGracePeriodSeconds: 30
+
+      containers:
+        - name: eventhub-outbox
+          # Replace YOUR_ACR with your actual Azure Container Registry name.
+          # deploy.sh patches this line automatically before kubectl apply.
+          image: "YOUR_ACR.azurecr.io/eventhub-outbox:1.0.0"
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8080
+              protocol: TCP
+
+          # ---------------------------------------------------------------
+          # Resources
+          # Requests = what the scheduler reserves on the node.
+          # Limits   = hard ceiling the OOM killer enforces.
+          # -Xmx768m in JAVA_TOOL_OPTIONS must stay below limits.memory.
+          # ---------------------------------------------------------------
+          resources:
+            requests:
+              cpu:    "250m"
+              memory: "512Mi"
+            limits:
+              cpu:    "1000m"
+              memory: "1Gi"
+
+          # ---------------------------------------------------------------
+          # Environment variables
+          # Every ${} placeholder in application.yml is satisfied here.
+          # ---------------------------------------------------------------
+          env:
+            # ── JVM flags ───────────────────────────────────────────────
+            - name: JAVA_TOOL_OPTIONS
+              value: "-Xms512m -Xmx768m -XX:+UseContainerSupport -XX:MaxRAMPercentage=75"
+
+            # ── datasource URL override ─────────────────────────────────
+            # application.yml hardcodes localhost:5432.
+            # This env var tells Spring to use the K8s PostgreSQL Service instead.
+            - name: SPRING_DATASOURCE_URL
+              value: "jdbc:postgresql://outbox-postgres:5432/outboxdb"
+
+            # ── non-secret config from ConfigMap ────────────────────────
+            - name: DB_USERNAME
+              valueFrom:
+                configMapKeyRef:
+                  name: outbox-config
+                  key:  DB_USERNAME
+
+            - name: EVENTHUB_NAMESPACE
+              valueFrom:
+                configMapKeyRef:
+                  name: outbox-config
+                  key:  EVENTHUB_NAMESPACE
+
+            - name: EVENTHUB_NAME
+              valueFrom:
+                configMapKeyRef:
+                  name: outbox-config
+                  key:  EVENTHUB_NAME
+
+            - name: EVENTHUB_CONSUMER_GROUP
+              valueFrom:
+                configMapKeyRef:
+                  name: outbox-config
+                  key:  EVENTHUB_CONSUMER_GROUP
+
+            - name: CHECKPOINT_CONTAINER
+              valueFrom:
+                configMapKeyRef:
+                  name: outbox-config
+                  key:  CHECKPOINT_CONTAINER
+
+            # ── secrets ─────────────────────────────────────────────────
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: outbox-secrets
+                  key:  DB_PASSWORD
+
+            - name: EVENTHUB_CONNECTION_STRING
+              valueFrom:
+                secretKeyRef:
+                  name: outbox-secrets
+                  key:  EVENTHUB_CONNECTION_STRING
+
+            - name: CHECKPOINT_STORAGE_CONNECTION_STRING
+              valueFrom:
+                secretKeyRef:
+                  name: outbox-secrets
+                  key:  CHECKPOINT_STORAGE_CONNECTION_STRING
+
+          # ---------------------------------------------------------------
+          # Probes
+          #
+          # startupProbe  – gives the JVM + Flyway time to finish.
+          #                 12 attempts × 5 s = 60 s window before K8s kills the pod.
+          # livenessProbe – failure restarts the container.
+          # readinessProbe– failure drains traffic from the pod.
+          # ---------------------------------------------------------------
+          startupProbe:
+            httpGet:
+              path: /actuator/health
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds:       5
+            failureThreshold:    12
+            timeoutSeconds:      3
+
+          livenessProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: 8080
+            periodSeconds:    10
+            failureThreshold: 3
+            timeoutSeconds:   3
+
+          readinessProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: 8080
+            periodSeconds:    5
+            failureThreshold: 3
+            timeoutSeconds:   3

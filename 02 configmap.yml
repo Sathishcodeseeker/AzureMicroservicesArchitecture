@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: outbox-config
+  namespace: outbox-svc
+  labels:
+    app: eventhub-outbox
+data:
+  # These values are referenced by the Deployment via env.valueFrom.configMapKeyRef
+  DB_USERNAME:              "outbox_user"
+  EVENTHUB_NAMESPACE:       "your-eventhub-namespace"   # ← replace with real namespace
+  EVENTHUB_NAME:            "events"
+  EVENTHUB_CONSUMER_GROUP:  "$Default"
+  CHECKPOINT_CONTAINER:     "checkpoints"

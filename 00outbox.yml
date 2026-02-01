@@ -1,0 +1,21 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: outbox-svc
+  labels:
+    app: eventhub-outbox
+---
+# Resource quota — caps the total resources this namespace can consume.
+# Tune the numbers to match your AKS node-pool sizing.
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: outbox-quota
+  namespace: outbox-svc
+spec:
+  hard:
+    requests.cpu:    "4"
+    requests.memory: "8Gi"
+    limits.cpu:      "8"
+    limits.memory:   "16Gi"
+    pods:            "20"

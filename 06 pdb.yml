@@ -1,0 +1,16 @@
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: eventhub-outbox-pdb
+  namespace: outbox-svc
+  labels:
+    app: eventhub-outbox
+spec:
+  # At least 2 pods must remain healthy during any voluntary disruption
+  # (node drain, cluster upgrade, etc.).
+  # With minReplicas=3 this means at most 1 pod is evicted at a time,
+  # keeping the CDC polling loop alive throughout.
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app: eventhub-outbox

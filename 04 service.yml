@@ -1,0 +1,24 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: eventhub-outbox
+  namespace: outbox-svc
+  labels:
+    app: eventhub-outbox
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port:   "8080"
+    prometheus.io/path:   "/actuator/prometheus"
+spec:
+  type: ClusterIP
+  selector:
+    app: eventhub-outbox
+  ports:
+    - name:       http
+      port:       80           # what other pods inside the cluster use
+      targetPort: 8080         # the container's actual listen port
+      protocol:   TCP
+    - name:       metrics
+      port:       8080         # Prometheus scrapes on this port directly
+      targetPort: 8080
+      protocol:   TCP

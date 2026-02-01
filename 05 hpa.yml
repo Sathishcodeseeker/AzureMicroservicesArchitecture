@@ -1,0 +1,43 @@
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: eventhub-outbox-hpa
+  namespace: outbox-svc
+  labels:
+    app: eventhub-outbox
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name:       eventhub-outbox
+
+  minReplicas: 3
+  maxReplicas: 10
+
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type:               Utilization
+          averageUtilization: 70
+
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type:               Utilization
+          averageUtilization: 80
+
+  behavior:
+    scaleUp:
+      policies:
+        - type:          Pods
+          value:         2        # add up to 2 pods every 60 s
+          periodSeconds: 60
+    scaleDown:
+      stabilizationWindowSeconds: 300   # ignore scale-down triggers for 5 min after last scale-up
+      policies:
+        - type:          Pods
+          value:         1        # remove at most 1 pod every 120 s
+          periodSeconds: 120
