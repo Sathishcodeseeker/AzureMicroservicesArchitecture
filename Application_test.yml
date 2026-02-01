@@ -1,0 +1,103 @@
+# application-test.yml
+# Loaded when @ActiveProfiles("test") is present.
+# Overrides only what needs to change for integration tests.
+
+spring:
+  # Datasource is overridden programmatically by the test base class
+  # pointing at the Testcontainer.  These are fallback defaults.
+  datasource:
+    url: jdbc:postgresql://localhost:5432/outboxdb_test
+    username: test_user
+    password: test_pass
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      maximum-pool-size: 5
+      minimum-idle: 2
+
+  jpa:
+    hibernate:
+      ddl-auto: validate      # Flyway handles schema; Hibernate only validates
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+        format_sql: true
+        jdbc:
+          batch_size: 50
+    show-sql: true            # helpful when debugging test failures
+
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+
+# Outbox — keep CDC off so tests drive it manually via direct method calls.
+outbox:
+  cdc:
+    enabled: false            # we call pollAndPublishEvents() explicitly
+    polling-interval-ms: 999999
+    batch-size: 100
+  cleanup:
+    enabled: false
+
+# Azure — these are never reached because EventHubPublisher is mocked,
+# but Spring still binds the properties class, so provide dummy values.
+azure:
+  eventhub:
+    namespace: test-namespace
+    connection-string: "Endpoint=sb://test.servicebus.windows.net/;SharedAccessKeyName=RootManageSharedAccessKey;SharedAccessKey=dGVzdA=="
+    event-hub-name: test-events
+    consumer-group: $Default
+    checkpoint-store:
+      connection-string: "DefaultEndpointsProtocol=https;AccountName=test;AccountKey=dGVzdA==;EndpointSuffix=core.windows.net"
+      container-name: checkpoints
+    backpressure:
+      max-batch-size: 100
+      max-wait-time-seconds: 10
+      prefetch-count: 300
+    retry:
+      max-retries: 3
+      backoff-delay-ms: 1000
+      max-backoff-delay-ms: 30000
+
+# Resilience4j — relax everything for tests
+resilience4j:
+  circuitbreaker:
+    instances:
+      orderService:
+        slidingWindowSize: 100
+        failureRateThreshold: 100
+      eventHubPublisher:
+        slidingWindowSize: 100
+        failureRateThreshold: 100
+  ratelimiter:
+    instances:
+      orderService:
+        limitForPeriod: 10000
+        limitRefreshPeriod: 1s
+      eventHubPublisher:
+        limitForPeriod: 10000
+        limitRefreshPeriod: 1s
+  bulkhead:
+    instances:
+      eventHubPublisher:
+        maxConcurrentCalls: 100
+  retry:
+    instances:
+      eventHubPublisher:
+        maxAttempts: 1          # no retry inside resilience4j; outbox retries handle it
+
+app:
+  event:
+    dlq:
+      enabled: true
+      max-retry-attempts: 3
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
+
+logging:
+  level:
+    com.enterprise.eventhub: DEBUG
+    org.hibernate.SQL: DEBUG
